@@ -1,0 +1,67 @@
+function obj = get_element_matrices(material, element_coordinates, u, w, tz, f)
+transverse = transpose([w(1),tz(1),w(2),tz(2)]);
+gauss = get_gaussian(element_coordinates(:), 2);
+
+J = gauss.matrix\element_coordinates(:);
+
+rho = material.rho;
+A = material.A;
+B = material.B;
+D = material.D;
+
+K11 = 0;
+K12 = 0;
+K21 = 0;
+K22 = 0;
+
+T22 = 0;
+
+F1 = 0;
+F2 = 0;
+
+Matrices = get_shape_matrices(element_coordinates(:));
+polynomial = get_polynomial(gauss.coordinates);
+
+shape_functions = get_shape_functions(polynomial, Matrices);
+
+for g=1:gauss.gp
+    weight = gauss.weights(g);
+    
+    phi = shape_functions.w(g,:);
+    dphi_x = shape_functions.dwx(g,:);
+    ddphi_xx = shape_functions.ddwxx(g,:);
+    zhi = shape_functions.u(g,:);
+    dzhi_x = shape_functions.dux(g,:);
+    
+    w0 = phi*transverse;
+    dwx0 = dphi_x*transverse;
+    u0 = zhi*u;
+    dux0 = dzhi_x*u;
+    
+    gx = gauss.coordinates(g);
+    
+    Jacobian = [0,1] * J * weight;
+    
+    dK11 = A*(dzhi_x'*dzhi_x);
+    K11 = K11 + dK11 * Jacobian;
+    
+    dK12 = 0.5*(A*dwx0)*(dzhi_x'*dphi_x);
+    K12 = K12 + dK12 * Jacobian;
+    
+    dK21 = (A*dwx0)*(dphi_x'*dzhi_x);
+    K12 = K12 + dK12;
+    
+    dK22 = D*(ddphi_xx'*ddphi_xx) + (A*dwx0^2)*(dphi_x'*dphi_x);
+    K22 = K22 + dK22 * Jacobian;
+    
+    F1 = F1 + zhi'*Jacobian;
+    F2 = F2 + phi'*Ja;
+    
+    dT22 = A*(dux0 + dwx0*dwx0)*(dphi_x'*dphi_x);
+    T22 = T22 + (dK22 + dT22) * Jacobian;
+    
+end
+T11 = K11;
+T21 = K21;
+T12 = 2*K12;
+end
