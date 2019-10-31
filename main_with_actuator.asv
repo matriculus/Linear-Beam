@@ -13,12 +13,28 @@ E_alum = 70e9; % in Pa
 nu_alum = 0.35;
 rho_alum = 2700; % in kg/m^3
 
-aluminium = get_mechanical_properties(E_alum, nu_alum, rho_alum, -dim.width/2, dim.width/2, -dim.depth/2, dim.depth/2);
+aluminium = get_mechanical_properties(E_alum, nu_alum, rho_alum, dim.width, -dim.depth/2, dim.depth/2);
 
+
+% piezo
+E_piezo = 63e9; % in Pa
+nu_piezo = 0.3;
+rho_piezo = 7600; % in kg/m^3
+
+depth = 0.2e-3; % in m
+
+piezo_act = get_mechanical_properties(E_piezo, nu_piezo, rho_piezo, dim.width, dim.depth/2, dim.depth/2 + depth);
+piezo_sen = get_mechanical_properties(E_piezo, nu_piezo, rho_piezo, dim.width, -dim.depth/2-depth, -dim.depth/2);
+piezo_act.piezoelectric_constant = 17.584; % Cm^-2
+piezo_sen.piezoelectric_constant = 17.584; % Cm^-2
+piezo_act.di
 %% Element properties
 dof_per_node = 3;
 elements = 20;
 beam = get_nodes_coords_connectivity(dim, elements, dof_per_node);
+
+element_act = [1];
+element_sen = [1];
 
 %% Load
 force = [0;-1;0];

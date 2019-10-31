@@ -1,4 +1,5 @@
 function obj = get_element_matrices(material, element_coordinates, u, w, tz, f)
+
 order = [1,3,4,2,5,6];
 transverse = transpose([w(1),tz(1),w(2),tz(2)]);
 gauss = get_gaussian(element_coordinates(:), 2);
@@ -20,10 +21,7 @@ T22 = 0;
 F1 = 0;
 F2 = 0;
 
-Matrices = get_shape_matrices(element_coordinates(:));
-polynomial = get_polynomial(gauss.coordinates);
-
-shape_functions = get_shape_functions(polynomial, Matrices);
+shape_functions = get_shape_functions(gauss.coordinates, element_coordinates);
 
 for g=1:gauss.gp
     weight = gauss.weights(g);

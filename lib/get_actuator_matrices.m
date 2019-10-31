@@ -1,13 +1,4 @@
-function obj = get_element_matrices(material, element_coordinates, u, w, tz, f, varargin)
-if isempty(varargin)
-    act = false;
-    sen = false;
-else
-    act = varargin{1};
-    piezo_act = varargin{2};
-    sen = varargin{3};
-    piezo_sen = varargin{4};
-end
+function obj = get_actuator_matrices(material, element_coordinates, u, w, tz, voltage)
 
 order = [1,3,4,2,5,6];
 transverse = transpose([w(1),tz(1),w(2),tz(2)]);
@@ -19,6 +10,9 @@ rho = material.rho;
 A = material.A;
 B = material.B;
 D = material.D;
+e31 = material.piezoelectric_constant;
+width = material.w;
+ra = material.lever_arm;
 
 K11 = 0;
 K12 = 0;
@@ -30,10 +24,7 @@ T22 = 0;
 F1 = 0;
 F2 = 0;
 
-Matrices = get_shape_matrices(element_coordinates(:));
-polynomial = get_polynomial(gauss.coordinates);
-
-shape_functions = get_shape_functions(polynomial, Matrices);
+shape_functions = get_shape_functions(gauss.coordinates, element_coordinates);
 
 for g=1:gauss.gp
     weight = gauss.weights(g);
@@ -65,30 +56,8 @@ for g=1:gauss.gp
     dK22 = D*(ddphi_xx'*ddphi_xx) + (A*dwx0^2)*(dphi_x'*dphi_x);
     K22 = K22 + dK22 * Jacobian;
     
-    F1 = F1 + zhi'*Jacobian;
-    F2 = F2 + [phi;dphi_x]'*Jacobian;
-    if act
-        A_p = 
-        dK11 = A*(dzhi_x'*dzhi_x);
-        K11 = K11 + dK11 * Jacobian;
-        
-        dK12 = 0.5*(A*dwx0)*(dzhi_x'*dphi_x);
-        K12 = K12 + dK12 * Jacobian;
-        
-        dK21 = (A*dwx0)*(dphi_x'*dzhi_x);
-        K21 = K21 + dK21 * Jacobian;
-        
-        dK22 = D*(ddphi_xx'*ddphi_xx) + (A*dwx0^2)*(dphi_x'*dphi_x);
-        K22 = K22 + dK22 * Jacobian;
-        
-        dT22 = A*(dux0 + dwx0*dwx0)*(dphi_x'*dphi_x);
-        T22 = T22 + (dK22 + dT22) * Jacobian;
-        
-        dF1 = material.piezoelectric_constant*material.w*dzhi_x';
-        F1 = F1 + dF1 * Jacobian;
-        dF2 = material.piezoelectric_constant*material.w*material.lever_arm*ddphi_xx';
-        F2 = F2 + dF2 * Jacobian;
-    end
+    F1 = F1 + e31*width*zhi'*Jacobian;
+    F2 = F2 - e31*width*ra*ddphi_xx'*Jacobian;
     
     dT22 = A*(dux0 + dwx0*dwx0)*(dphi_x'*dphi_x);
     T22 = T22 + (dK22 + dT22) * Jacobian;
@@ -100,7 +69,7 @@ T12 = 2*K12;
 
 T = [T11, T12; T21, T22];
 obj.tangent = T(order, order);
-external_force = blkdiag(F1,F2)*f;
+external_force = [F1;F2]*voltage;
 internal_force = [K11,K12;K21,K22]*[u;transverse];
 obj.residue = external_force(order) - internal_force(order);
 end

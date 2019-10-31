@@ -1,4 +1,7 @@
-function obj = get_shape_functions(polynomial, matrices)
+function obj = get_shape_functions(values, coordinates)
+matrices = get_shape_matrices(coordinates(:));
+polynomial = get_polynomial(values);
+
 transverse = matrices.transverse;
 axial = matrices.axial;
 
