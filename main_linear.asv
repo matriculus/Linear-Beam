@@ -14,7 +14,6 @@ rho_alum = 2700; % in kg/m^3
 
 aluminium = get_mechanical_properties(E_alum, nu_alum, rho_alum, dim.width, -dim.depth/2, dim.depth/2);
 
-%% Element properties
 dof_per_node = 2;
 elements = 10;
 beam = get_nodes_coords_connectivity(dim, elements, dof_per_node);
@@ -32,7 +31,7 @@ K_global = zeros(beam.total_dofs, beam.total_dofs);
 M_global = zeros(beam.total_dofs, beam.total_dofs);
 F_global = zeros(beam.total_dofs,1);
 
-%% Matrix construction
+
 for element = 1:beam.total_elements
     dof_address = node2dof(beam.connectivity(element,:),dof_per_node);
     el_connect = dof_address(:);
