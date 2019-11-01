@@ -33,8 +33,8 @@ dof_per_node = 3;
 elements = 20;
 beam = get_nodes_coords_connectivity(dim, elements, dof_per_node);
 
-element_act = [1:elements];
-element_sen = [1];
+element_act = [1:3];
+element_sen = [1:3];
 
 %% Load
 force = [0;0;0];
