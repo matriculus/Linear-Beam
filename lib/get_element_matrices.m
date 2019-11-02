@@ -8,5 +8,5 @@ obj.mass = rho*len/420*[156, 22*len, 54, -13*len;
     22*len, 4*len^2, 13*len, -3*len^2;
     54, 13*len, 156, -22*len;
     -13*len, -3*len^2, -22*len, 4*len^2];
-obj.force = [0.5*len;1/12*len^2;0.5*len;-1/12*len^2];
+obj.force = [0.5*len, -1, 0;1/12*len^2, 0, -1;0.5*len, 1, 0;-1/12*len^2, 0, 1];
 end
