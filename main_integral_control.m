@@ -129,19 +129,26 @@ R = 0.01;
 shape = eigenvectors(:,2);
 xref = 1e-2*shape/max(shape);
 
+kI = 1;
 k1 = 1;
-k2 = 1;
+k2 = 2;
 CMF = C*(M\P);
-KG = [k1*C - C*(M\K), k2*C - C*(M\D)];
+KG = [k1*C - C*(M\K), k2*C - C*(M\D), kI*eye(n_sen,n_sen)];
 Gain1 = CMF\KG;
 resF = CMF\(k1.*C)*xref;
 
+%% Augmented system
+y0 = [y0;zeros(n_sen,1)];
+Aaug = [Asys,zeros(2*n,n_sen);Csys,zeros(n_sen,n_sen)];
+Baug = [Bcont;zeros(n_sen,n_act)];
+Be_aug = [Bext;zeros(n_sen,3)];
+Ref = [zeros(2*n,n_sen);-eye(n_sen)]*C*xref;
 %% ODE solution
 % ydot = @(t,y) Asys*y + Bcont*(-Gain)*y + Bext*[0;-1;0];
-ydot = @(t,y) Asys*y + Bcont*(-Gain1)*y + Bcont*resF + Bext*[1e-2;0;0];
+ydot = @(t,y) Aaug*y + Baug*(-Gain1)*y + Baug*resF + Be_aug*[1e-2;0;0] + Ref;
 
 [~, y] = ode45(ydot, tspan, y0);
-
+%% Solution
 U = zeros(tn, beam.total_dofs);
 V = zeros(tn, beam.total_dofs);
 
@@ -149,7 +156,7 @@ U(:,beam.free_dofs) = y(:,1:n);
 V(:,beam.free_dofs) = y(:,(n+1):2*n);
 
 %% Input Output
-Output = y*Csys';
+Output = y(:,1:2*n)*Csys';
 Input = y*-Gain1' + ones(tn,1)*resF';
 
 %% Error in DI
