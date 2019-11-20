@@ -2,9 +2,9 @@ close all;clear;clc;
 addpath('lib');
 
 %% Dimensions
-dim.length = 1; % in m
-dim.width = 0.1; % in m
-dim.depth = 0.01; % in m
+dim.length = 0.5; % in m
+dim.width = 0.03; % in m
+dim.depth = 0.002; % in m
 dim.support_condition = 'c'; % 'c' for cantilever
 
 %% Material
@@ -42,8 +42,8 @@ txdof = beam.dofs(2,:);
 
 n_f_dof = beam.dofs(2,end);
 
-element_act = [1,2,3;4,5,6;7,8,9];
-element_sen = [1,2,3;4,5,6;7,8,9];
+element_act = [1:3;4:6;7:9];
+element_sen = [1:3;4:6;7:9];
 
 n_act = size(element_act,1);
 n_sen = size(element_sen,1);
@@ -59,9 +59,10 @@ C_global = zeros(n_sen,beam.total_dofs);
 for element = 1:beam.total_elements
     dof_address = node2dof(beam.connectivity(element,:),dof_per_node);
     el_connect = dof_address(:);
-    l = beam.element_coordinates(element,:)*[-1;1];
+    x1 = beam.element_coordinates(element,1);
+    x2 = beam.element_coordinates(element,2);
     
-    element_matrices = get_element_matrices(material.D, material.rho, l);
+    element_matrices = get_element_matrices(material.D, material.rho, x1,x2);
     
     K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + element_matrices.stiffness;
     M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + element_matrices.mass;
@@ -69,7 +70,7 @@ for element = 1:beam.total_elements
     
     for el = 1:n_act
         if any(element_act(el,:) == element)
-            pzt_matrices = get_actuator_matrices(piezo_act.D, piezo_act.rho, piezo_act.piezoelectric_constant*beam.width, l, piezo_act.lever_arm);
+            pzt_matrices = get_actuator_matrices(piezo_act.D, piezo_act.rho, piezo_act.piezoelectric_constant,beam.width, x1, x2, piezo_act.lever_arm);
             K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + pzt_matrices.stiffness;
             M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + pzt_matrices.mass;
             P_global(el_connect,el) = P_global(el_connect,el) + pzt_matrices.force;
@@ -77,10 +78,10 @@ for element = 1:beam.total_elements
     end
     for el = 1:n_sen
         if any(element_sen(el,:) == element)
-            pzt_matrices = get_sensor_matrices(piezo_sen.D, piezo_sen.rho, piezo_sen.piezoelectric_constant*pzt_depth/piezo_sen.dielectric_constant, l, piezo_sen.lever_arm);
+            pzt_matrices = get_sensor_matrices(piezo_sen.D, piezo_sen.rho, piezo_sen.piezoelectric_constant,piezo_sen.dielectric_constant,pzt_depth, x1, x2, piezo_sen.lever_arm);
             K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + pzt_matrices.stiffness;
             M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + pzt_matrices.mass;
-            C_global(el,el_connect) = C_global(el,el_connect) + transpose(pzt_matrices.force);
+            C_global(el,el_connect) = C_global(el,el_connect) + pzt_matrices.force;
         end
     end
 end
@@ -116,7 +117,8 @@ Bcont = [zeros(n,n_act); M\P];
 Csys = [C, zeros(n_sen,n)];
 
 tn = 100;
-tspan = linspace(0,25,tn);
+tf = 10;
+tspan = linspace(0,tf,tn);
 x0 = zeros(n,1);
 xd0 = zeros(n,1);
 y0 = [x0;xd0];
@@ -128,12 +130,15 @@ R = 0.01;
 
 
 %% Dynamic Inversion
-shape = eigenvectors(:,2);
-xref = 1e-2*shape/max(shape);
+shp = [1];
+shape = zeros(n,1);
+shape(beam.free_dofs) = eigenvectors(:,shp)*ones(length(shp),1);
+shape = 1e-4*shape/max(shape(wdof));
+xref = shape(beam.free_dofs);
 
-kI = 1;
-k1 = 1;
-k2 = 2;
+kI = 200;
+k1 = 100;
+k2 = 10;
 CMF = C*(M\P);
 KG = [k1*C - C*(M\K), k2*C - C*(M\D), kI*eye(n_sen,n_sen)];
 Gain1 = CMF\KG;
@@ -146,8 +151,9 @@ Baug = [Bcont;zeros(n_sen,n_act)];
 Be_aug = [Bext;zeros(n_sen,3)];
 Ref = [zeros(2*n,n_sen);-eye(n_sen)]*C*xref;
 %% ODE solution
+f = @(t,ti) (t>ti).*(-1e-6.*sin(20.*(t-ti)) - 1e-6);
 % ydot = @(t,y) Asys*y + Bcont*(-Gain)*y + Bext*[0;-1;0];
-ydot = @(t,y) Aaug*y + Baug*(-Gain1)*y + Baug*resF + Be_aug*[1e-2;0;0] + Ref;
+ydot = @(t,y) Aaug*y + Baug*(-Gain1)*y + Baug*resF + Be_aug*[0;f(t,0.0);0] + Ref;
 
 [~, y] = ode45(ydot, tspan, y0);
 %% Solution
@@ -157,6 +163,11 @@ V = zeros(tn, beam.total_dofs);
 U(:,beam.free_dofs) = y(:,1:n);
 V(:,beam.free_dofs) = y(:,(n+1):2*n);
 
+norm_con = zeros(tn,1);
+for i=1:tn
+    norm_con(i) = norm(U(i,:),2);
+end
+shape_norm = norm(shape,2).*ones(tn,1);
 %% Input Output
 Output = y(:,1:2*n)*Csys';
 Input = y*-Gain1' + ones(tn,1)*resF';
@@ -164,6 +175,18 @@ Input = y*-Gain1' + ones(tn,1)*resF';
 %% Error in DI
 Error = Output - ones(tn,1)*transpose(C*xref);
 %% Figures
+solution.Ucon = U;
+solution.Vcon = V;
+solution.Output = Output;
+solution.Input = Input;
+solution.norm_con = norm_con;
+folder = sprintf('results/%s/forced_integral_control_[k1_%d,k2_%d,kI_%d]_s_%s_t_%0.1f',date,k1,k2,kI,num2str(shp),tf);
+mkdir(folder);
+fname = sprintf('%s/shape',folder);
+filename = 'variables';
+filename = sprintf('%s_%s.mat',fname,filename);
+save(filename,'tspan','solution','beam');
+
 lga = [];
 lgs = [];
 for i=1:n_act
@@ -179,20 +202,63 @@ surf(U(:,wdof));
 xlabel('Length (m)');
 ylabel('Time (s)');
 zlabel('Deformation (m)');
+filename = 'space_time';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');
 
 figure;
 plot(tspan, Output,'LineWidth',2);
 legend(lgs);
 xlabel('Time (s)');
 ylabel('Voltage (V)');
+filename = 'sensor';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');
 
 figure;
 plot(tspan, Input,'LineWidth',2);
 legend(lga);
 xlabel('Time (s)');
 ylabel('Voltage (V)');
+filename = 'actuator';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');
 
 figure;
 plot(tspan, Error,'LineWidth',2);
 xlabel('Time (s)');
 ylabel('Error');
+filename = 'error';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');
+
+figure;
+plot(tspan, norm_con,'b-','LineWidth',2);
+hold on;
+plot(tspan, shape_norm,'r--','LineWidth',2);
+hold off;
+legend('Achieved','Target');
+xlabel('Time (s)');
+ylabel('Deformation norm (m)');
+filename = 'norm_comp';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');
+
+%% shape comparison
+figure;
+plot(beam.global_coordinates,U(end,wdof)','b-','LineWidth',2);
+hold on;
+plot(beam.global_coordinates,shape(wdof),'r--','LineWidth',2);
+legend('Achieved','Target');
+xlabel('X axis (m)');
+ylabel('Displacement (m)');
+hold off;
+filename = 'shape_comp';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');

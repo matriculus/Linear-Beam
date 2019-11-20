@@ -2,31 +2,33 @@ close all;clear;clc;
 addpath('lib');
 
 %% Dimensions
-dim.length = 1; % in m
-dim.width = 0.1; % in m
-dim.depth = 0.01; % in m
+dim.length = 0.5; % in m
+dim.width = 0.03; % in m
+dim.depth = 0.002; % in m
 dim.support_condition = 'c'; % 'c' for cantilever
 
 %% Material
-E_alum = 70e9; % in Pa
-nu_alum = 0.35;
-rho_alum = 2700; % in kg/m^3
+% steel
+E = 210e9; % in Pa
+nu = 0.3;
+rho = 7800; % in kg/m^3
 cdr = 0.002; % critical damping ratio
-aluminium = get_mechanical_properties(E_alum, nu_alum, rho_alum, dim.width, -dim.depth/2, dim.depth/2);
+material = get_mechanical_properties(E, nu, rho, dim.width, -dim.depth/2, dim.depth/2);
 
 %% Actuator
-E_piezo = 63e9; % in Pa
+% piezo
+E_piezo = 139e9; % in Pa
 nu_piezo = 0.3;
-rho_piezo = 7600; % in kg/m^3
+rho_piezo = 7500; % in kg/m^3
 
-depth = 0.2e-3; % in m
+pzt_depth = 0.2e-3; % in m
 
-piezo_act = get_mechanical_properties(E_piezo, nu_piezo, rho_piezo, dim.width, dim.depth/2, dim.depth/2 + depth);
-piezo_sen = get_mechanical_properties(E_piezo, nu_piezo, rho_piezo, dim.width, -dim.depth/2-depth, -dim.depth/2);
-piezo_act.e31 = 17.584; % Cm^-2
-piezo_sen.e31 = 17.584; % Cm^-2
-piezo_act.dielectric_constant = 15e-9; % Fm^-2
-
+piezo_act = get_mechanical_properties(E_piezo, nu_piezo, rho_piezo, dim.width, dim.depth/2, dim.depth/2 + pzt_depth);
+piezo_sen = get_mechanical_properties(E_piezo, nu_piezo, rho_piezo, dim.width, -dim.depth/2-pzt_depth, -dim.depth/2);
+piezo_act.piezoelectric_constant = 15.29; % Cm^-2
+piezo_sen.piezoelectric_constant = 15.29; % Cm^-2
+piezo_act.dielectric_constant = 11e-9; % Fm^-2
+piezo_sen.dielectric_constant = 11e-9; % Fm^-2
 %% Element
 dof_per_node = 2;
 elements = 10;
@@ -40,8 +42,8 @@ txdof = beam.dofs(2,:);
 
 n_f_dof = beam.dofs(2,end);
 
-element_act = [1,2,3;4,5,6;7,8,9];
-element_sen = [1,2,3;4,5,6;7,8,9];
+element_act = [1:3;4:6;7:9];
+element_sen = [1:3;4:6;7:9];
 
 n_act = size(element_act,1);
 n_sen = size(element_sen,1);
@@ -59,7 +61,7 @@ for element = 1:beam.total_elements
     el_connect = dof_address(:);
     l = beam.element_coordinates(element,:)*[-1;1];
     
-    element_matrices = get_element_matrices(aluminium.D, aluminium.rho, l);
+    element_matrices = get_element_matrices(material.D, material.rho, l);
     
     K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + element_matrices.stiffness;
     M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + element_matrices.mass;
@@ -67,7 +69,7 @@ for element = 1:beam.total_elements
     
     for el = 1:n_act
         if any(element_act(el,:) == element)
-            pzt_matrices = get_actuator_matrices(piezo_act.D, piezo_act.rho, piezo_act.e31*beam.width, l, piezo_act.lever_arm);
+            pzt_matrices = get_actuator_matrices(piezo_act.D, piezo_act.rho, piezo_act.piezoelectric_constant*beam.width, l, piezo_act.lever_arm);
             K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + pzt_matrices.stiffness;
             M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + pzt_matrices.mass;
             P_global(el_connect,el) = P_global(el_connect,el) + pzt_matrices.force;
@@ -75,7 +77,7 @@ for element = 1:beam.total_elements
     end
     for el = 1:n_sen
         if any(element_sen(el,:) == element)
-            pzt_matrices = get_actuator_matrices(piezo_sen.D, piezo_sen.rho, piezo_sen.e31*beam.width, l, piezo_sen.lever_arm);
+            pzt_matrices = get_sensor_matrices(piezo_sen.D, piezo_sen.rho, piezo_sen.piezoelectric_constant*pzt_depth/piezo_sen.dielectric_constant, l, piezo_sen.lever_arm);
             K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + pzt_matrices.stiffness;
             M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + pzt_matrices.mass;
             C_global(el,el_connect) = C_global(el,el_connect) + transpose(pzt_matrices.force);
@@ -89,17 +91,17 @@ P = P_global(beam.free_dofs,:);
 C = C_global(:,beam.free_dofs);
 
 %% Static
-StaticU(beam.free_dofs) = K\P*[1;-1;1];
-figure;
-plot(StaticU(wdof));
+% StaticU(beam.free_dofs) = K\P*[1;-1;1];
+% figure;
+% plot(StaticU(wdof));
 
 %% Modal analysis
 [eigenvectors, eigenvalues] = eig(K,M);
 [eigenvalues, indices] = sort(diag(eigenvalues));
 eigenvectors = eigenvectors(:,indices);
 frequencies = sqrt(eigenvalues);
-w1 = frequencies(1);
-w2 = frequencies(2);
+w1 = frequencies(1)/(2*pi);
+w2 = frequencies(2)/(2*pi);
 bet = 2*cdr/(w1+w2);
 alp = w1*w2*bet;
 
@@ -114,7 +116,8 @@ Bcont = [zeros(n,n_act); M\P];
 Csys = [C, zeros(n_sen,n)];
 
 tn = 100;
-tspan = linspace(0,25,tn);
+tf = 10;
+tspan = linspace(0,tf,tn);
 x0 = zeros(n,1);
 xd0 = zeros(n,1);
 y0 = [x0;xd0];
@@ -126,20 +129,24 @@ R = 0.01;
 
 
 %% Dynamic Inversion
+shp = 2;
 shape = zeros(n,1);
-shape(beam.free_dofs) = eigenvectors(:,2);
-xref = 1e-2*shape(beam.free_dofs)/max(shape(wdof));
+shape(beam.free_dofs) = eigenvectors(:,shp);
+shape = 1e-4*shape/max(shape(wdof));
+xref = shape(beam.free_dofs);
 
 k1 = 1;
-k2 = 1;
+k2 = 2;
 CMF = C*(M\P);
 KG = [k1*C - C*(M\K), k2*C - C*(M\D)];
 Gain1 = CMF\KG;
 resF = CMF\(k1.*C)*xref;
 
+%% uncontrolled
+ur = Bcont\Asys*[xref;0.*xref];
 %% ODE solution
-ydot_u = @(t,y) Asys*y + Bext*[0;0;0];
-ydot_c = @(t,y) Asys*y + Bcont*(-Gain1)*y + Bcont*resF + Bext*[0;0;0];
+ydot_u = @(t,y) Asys*y + Bcont*ur + Bext*[0;0;0];
+ydot_c = @(t,y) Asys*y + Bcont*(-Gain1*y + resF) + Bext*[0;0;0];
 
 [~, y_c] = ode45(ydot_c, tspan, y0);
 [~, y_u] = ode45(ydot_u, tspan, y0);
@@ -160,8 +167,8 @@ Vuncon(:,beam.free_dofs) = y_u(:,(n+1):2*n);
 norm_con = zeros(tn,1);
 norm_uncon = zeros(tn,1);
 for i=1:tn
-    norm_con = norm(Ucon(i,:),2);
-    norm_uncon = norm(Uuncon(i,:),2);
+    norm_con(i) = norm(Ucon(i,:),2);
+    norm_uncon(i) = norm(Uuncon(i,:),2);
 end
 %% Input Output
 Output = y_c*Csys';
@@ -170,8 +177,20 @@ Input = y_c*-Gain1' + ones(tn,1)*resF';
 %% Error in DI
 Error = Output - ones(tn,1)*transpose(C*xref);
 %% Figures
-mkdir(date);
-fname = sprintf('%s/odi_controlled',date);
+solution.Ucon = Ucon;
+solution.Vcon = Vcon;
+solution.Uuncon = Uuncon;
+solution.Vuncon = Vuncon;
+solution.Output = Output;
+solution.Input = Input;
+solution.norm_con = norm_con;
+solution.norm_uncon = norm_uncon;
+folder = sprintf('results/%s/compare_[k1_%d,k2_%d]_s_%i_t_%0.1f',date,k1,k2,shp,tf);
+mkdir(folder);
+fname = sprintf('%s/shape',folder);
+filename = 'variables';
+filename = sprintf('%s_%s.mat',fname,filename);
+save(filename,'tspan','solution','beam');
 
 lga = [];
 lgs = [];
@@ -225,7 +244,7 @@ saveas(gcf,filename,'png');
 figure;
 plot(tspan, norm_uncon,'b:','LineWidth',2);
 hold on;
-plot(tspan, norm_con,'','LineWidth',2);
+plot(tspan, norm_con,'r-','LineWidth',2);
 hold off;
 legend('Uncontrolled', 'Controlled');
 xlabel('Time (s)');
@@ -236,4 +255,14 @@ saveas(gcf,filename,'fig');
 saveas(gcf,filename,'png');
 
 figure;
-plot(beam.global_coordinates, shape(wdof));
+plot(beam.global_coordinates, shape(wdof),'b--','LineWidth',2);
+hold on;
+plot(beam.global_coordinates, Ucon(end,wdof),'r-','LineWidth',2);
+hold off;
+legend('Target','Achieved');
+xlabel('Length (m)');
+ylabel('Displacement (m)');
+filename = 'shape';
+filename = sprintf('%s_%s',fname,filename);
+saveas(gcf,filename,'fig');
+saveas(gcf,filename,'png');

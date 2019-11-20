@@ -43,33 +43,38 @@ txdof = beam.dofs(2,:);
 n_f_dof = beam.dofs(2,end);
 
 element_act = [1:3;4:6;7:9];
-element_sen = [1:3;4:6;7:9];
+element_sen = element_act;
 
 n_act = size(element_act,1);
 n_sen = size(element_sen,1);
 
 %% Matrix construction
-StaticU = zeros(beam.total_dofs,1);
 K_global = zeros(beam.total_dofs, beam.total_dofs);
 M_global = zeros(beam.total_dofs, beam.total_dofs);
 F_global = zeros(beam.total_dofs,3);
 P_global = zeros(beam.total_dofs,n_act);
 C_global = zeros(n_sen,beam.total_dofs);
+K_beam = zeros(beam.total_dofs, beam.total_dofs);
+M_beam = zeros(beam.total_dofs, beam.total_dofs);
 
 for element = 1:beam.total_elements
     dof_address = node2dof(beam.connectivity(element,:),dof_per_node);
     el_connect = dof_address(:);
-    l = beam.element_coordinates(element,:)*[-1;1];
+    x1 = beam.element_coordinates(element,1);
+    x2 = beam.element_coordinates(element,2);
     
-    element_matrices = get_element_matrices(material.D, material.rho, l);
+    element_matrices = get_element_matrices(material.D, material.rho, x1,x2);
     
     K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + element_matrices.stiffness;
     M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + element_matrices.mass;
     F_global(el_connect,:) = F_global(el_connect,:) + element_matrices.force;
     
+    K_beam(el_connect, el_connect) = K_beam(el_connect, el_connect) + element_matrices.stiffness;
+    M_beam(el_connect, el_connect) = M_beam(el_connect, el_connect) + element_matrices.mass;
+    
     for el = 1:n_act
         if any(element_act(el,:) == element)
-            pzt_matrices = get_actuator_matrices(piezo_act.D, piezo_act.rho, piezo_act.piezoelectric_constant*beam.width, l, piezo_act.lever_arm);
+            pzt_matrices = get_actuator_matrices(piezo_act.D, piezo_act.rho, piezo_act.piezoelectric_constant,beam.width, x1, x2, piezo_act.lever_arm);
             K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + pzt_matrices.stiffness;
             M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + pzt_matrices.mass;
             P_global(el_connect,el) = P_global(el_connect,el) + pzt_matrices.force;
@@ -77,10 +82,10 @@ for element = 1:beam.total_elements
     end
     for el = 1:n_sen
         if any(element_sen(el,:) == element)
-            pzt_matrices = get_sensor_matrices(piezo_sen.D, piezo_sen.rho, piezo_sen.piezoelectric_constant*pzt_depth/piezo_sen.dielectric_constant, l, piezo_sen.lever_arm);
+            pzt_matrices = get_sensor_matrices(piezo_sen.D, piezo_sen.rho, piezo_sen.piezoelectric_constant,piezo_sen.dielectric_constant,pzt_depth, x1, x2, piezo_sen.lever_arm);
             K_global(el_connect, el_connect) = K_global(el_connect, el_connect) + pzt_matrices.stiffness;
             M_global(el_connect, el_connect) = M_global(el_connect, el_connect) + pzt_matrices.mass;
-            C_global(el,el_connect) = C_global(el,el_connect) + transpose(pzt_matrices.force);
+            C_global(el,el_connect) = C_global(el,el_connect) + pzt_matrices.force;
         end
     end
 end
@@ -90,13 +95,11 @@ F = F_global(beam.free_dofs,:);
 P = P_global(beam.free_dofs,:);
 C = C_global(:,beam.free_dofs);
 
-%% Static
-% StaticU(beam.free_dofs) = K\P*[1;-1;1];
-% figure;
-% plot(StaticU(wdof));
+Kb = K_beam(beam.free_dofs, beam.free_dofs);
+Mb = M_beam(beam.free_dofs, beam.free_dofs);
 
 %% Modal analysis
-[eigenvectors, eigenvalues] = eig(K,M);
+[eigenvectors, eigenvalues] = eig(Kb,Mb);
 [eigenvalues, indices] = sort(diag(eigenvalues));
 eigenvectors = eigenvectors(:,indices);
 frequencies = sqrt(eigenvalues);
@@ -106,6 +109,12 @@ bet = 2*cdr/(w1+w2);
 alp = w1*w2*bet;
 
 D = alp*M + bet*K;
+
+%% Frequencies
+fprintf('Frequencies:\n');
+for f=frequencies
+    fprintf('%f\n',f);
+end
 %% Dynamics
 n = length(beam.free_dofs);
 
@@ -116,7 +125,8 @@ Bcont = [zeros(n,n_act); M\P];
 Csys = [C, zeros(n_sen,n)];
 
 tn = 100;
-tspan = linspace(0,10,tn);
+tf = 4;
+tspan = linspace(0,tf,tn);
 x0 = zeros(n,1);
 xd0 = zeros(n,1);
 y0 = [x0;xd0];
@@ -128,24 +138,24 @@ R = 0.01;
 
 
 %% Dynamic Inversion
+shp = [2];
 shape = zeros(n,1);
-shape(beam.free_dofs) = eigenvectors(:,1);
-shape = 1e-2*shape/max(shape(wdof));
+shape(beam.free_dofs) = eigenvectors(:,shp)*ones(length(shp),1);
+shape = 1e-4*shape/max(shape(wdof));
 xref = shape(beam.free_dofs);
 
-k1 = 1;
-k2 = 1;
+k1 = 500;
+k2 = 10;
 CMF = C*(M\P);
 KG = [k1*C - C*(M\K), k2*C - C*(M\D)];
 Gain1 = CMF\KG;
 resF = CMF\(k1.*C)*xref;
 
 %% ODE solution
-ydot_u = @(t,y) Asys*y + Bcont*resF + Bext*[0;0;0];
-ydot_c = @(t,y) Asys*y + Bcont*(-Gain1*y + resF) + Bext*[0;0;0];
+f = @(t,ti) (t>ti).*(-1e-6.*sin(20.*(t-ti)) - 1e-6);
+ydot_c = @(t,y) Asys*y + Bcont*(-Gain1*y + resF) + Bext*[0;0.*f(t,0.0);0]; % (t>0.5)*1e-4*exp(-10*(t-0.5))
 
 [~, y_c] = ode45(ydot_c, tspan, y0);
-[~, y_u] = ode45(ydot_u, tspan, y0);
 
 %% Post processing
 Ucon = zeros(tn, beam.total_dofs);
@@ -154,18 +164,11 @@ Vcon = zeros(tn, beam.total_dofs);
 Ucon(:,beam.free_dofs) = y_c(:,1:n);
 Vcon(:,beam.free_dofs) = y_c(:,(n+1):2*n);
 
-Uuncon = zeros(tn, beam.total_dofs);
-Vuncon = zeros(tn, beam.total_dofs);
-
-Uuncon(:,beam.free_dofs) = y_u(:,1:n);
-Vuncon(:,beam.free_dofs) = y_u(:,(n+1):2*n);
-
 norm_con = zeros(tn,1);
-norm_uncon = zeros(tn,1);
 for i=1:tn
     norm_con(i) = norm(Ucon(i,:),2);
-    norm_uncon(i) = norm(Uuncon(i,:),2);
 end
+shape_norm = norm(shape,2).*ones(tn,1);
 %% Input Output
 Output = y_c*Csys';
 Input = y_c*-Gain1' + ones(tn,1)*resF';
@@ -175,13 +178,11 @@ Error = Output - ones(tn,1)*transpose(C*xref);
 %% Figures
 solution.Ucon = Ucon;
 solution.Vcon = Vcon;
-solution.Uuncon = Uuncon;
-solution.Vuncon = Vuncon;
 solution.Output = Output;
 solution.Input = Input;
 solution.norm_con = norm_con;
-solution.norm_uncon = norm_uncon;
-folder = sprintf('results/%s/%s',date,'vib_controlled_[1,1]_shape_1_noncollocated');
+%%
+folder = sprintf('results/%s/forced_vib_control_[k1_%d,k2_%d]_s_%s_t_%0.1f',date,k1,k2,num2str(shp),tf);
 mkdir(folder);
 fname = sprintf('%s/shape',folder);
 filename = 'variables';
@@ -199,7 +200,7 @@ for i=1:n_sen
 end
 
 figure;
-surf(Ucon(:,wdof));
+surf(real(Ucon(:,wdof)));
 xlabel('Length (m)');
 ylabel('Time (s)');
 zlabel('Deformation (m)');
@@ -238,11 +239,11 @@ saveas(gcf,filename,'fig');
 saveas(gcf,filename,'png');
 
 figure;
-% plot(tspan, norm_uncon,'b:','LineWidth',2);
-% hold on;
-plot(tspan, norm_con,'r-','LineWidth',2);
-% hold off;
-% legend('Uncontrolled', 'Controlled');
+plot(tspan, norm_con,'b-','LineWidth',2);
+hold on;
+plot(tspan, shape_norm,'r--','LineWidth',2);
+hold off;
+legend('Achieved','Target');
 xlabel('Time (s)');
 ylabel('Deformation norm (m)');
 filename = 'norm_comp';
@@ -251,9 +252,9 @@ saveas(gcf,filename,'fig');
 saveas(gcf,filename,'png');
 
 figure;
-plot(beam.global_coordinates, shape(wdof),'b--','LineWidth',2);
+plot(beam.global_coordinates, shape(wdof),'r--','LineWidth',2);
 hold on;
-plot(beam.global_coordinates, Ucon(end,wdof),'r-','LineWidth',2);
+plot(beam.global_coordinates, Ucon(end,wdof),'b-','LineWidth',2);
 hold off;
 legend('Target','Achieved');
 xlabel('Length (m)');
